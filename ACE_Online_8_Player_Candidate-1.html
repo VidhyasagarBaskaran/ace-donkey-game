@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>ACE - The Donkey Game</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
+        
+        * { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e;
+            color: white;
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        @keyframes deal { 0% { transform: translate(-50%, -50%) scale(0.1); opacity: 0; } 100% { transform: translate(0, 0) scale(1); opacity: 1; } }
+        @keyframes popIn { 0% { transform: scale(0); } 80% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        .hand-scroll::-webkit-scrollbar { width: 4px; }
+        .hand-scroll::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        .hand-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+        .card {
+            width: 70px; height: 100px; background-color: white; border-radius: 6px;
+            display: flex; flex-direction: column; justify-content: space-between;
+            padding: 4px; position: relative; box-shadow: -2px 2px 5px rgba(0,0,0,0.4);
+            transition: transform 0.2s, margin 0.2s, box-shadow 0.2s; flex-shrink: 0;
+            border: 1px solid #ddd; cursor: pointer;
+        }
+        .card-sm { width: 52px; height: 75px; padding: 2px; border-radius: 4px; }
+        .card:active { transform: scale(0.95); }
+        .card.disabled { filter: grayscale(100%) brightness(70%); cursor: not-allowed; opacity: 0.6; pointer-events: none; }
+        
+        .card-red { color: #e11d48; }
+        .card-black { color: #1f2937; }
+        
+        .card-value { font-weight: 800; font-size: 16px; line-height: 1; }
+        .card-sm .card-value { font-size: 12px; }
+        .card-suit { font-size: 14px; line-height: 1; }
+        .card-sm .card-suit { font-size: 10px; }
+        .card-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; }
+        .card-sm .card-center { font-size: 20px; }
+
+        .card-back {
+            background: repeating-linear-gradient(45deg, #1e3a8a, #1e3a8a 5px, #172554 5px, #172554 10px);
+            border: 2px solid white; display: flex; justify-content: center; align-items: center;
+        }
+        .card-back::after { content: 'ACE'; font-size: 10px; color: rgba(255,255,255,0.5); transform: rotate(-45deg); }
+
+        .game-table {
+            background-color: #064e3b; border: 12px solid #3f2c22; border-radius: 100px;
+            position: relative; width: 95%; height: 50vh; margin: auto;
+            box-shadow: inset 0 0 80px rgba(0,0,0,0.8);
+        }
+
+        .player-seat { position: absolute; display: flex; flex-direction: column; align-items: center; width: 80px; transition: all 0.5s ease; }
+        .avatar {
+            width: 46px; height: 46px; background-color: #374151; border: 3px solid #4b5563;
+            border-radius: 50%; display: flex; justify-content: center; align-items: center;
+            font-size: 22px; box-shadow: 0 4px 6px rgba(0,0,0,0.5); z-index: 10; position: relative;
+        }
+        .avatar.active-turn { border-color: #facc15; box-shadow: 0 0 20px #facc15; animation: pulse 1.5s infinite; }
+        .avatar.winner { border-color: #22c55e; opacity: 0.7; }
+        .avatar.loser { border-color: #ef4444; }
+        .avatar.nemesis { border-color: #ef4444; box-shadow: 0 0 10px red; } 
+        
+        .player-badge {
+            position: absolute; top: -5px; right: -5px; width: 18px; height: 18px;
+            background: red; border-radius: 50%; color: white; font-size: 10px;
+            display: flex; justify-content: center; align-items: center; border: 1px solid white;
+        }
+
+        .mini-card-stack { display: flex; margin-top: -10px; z-index: 5; height: 20px; }
+        .mini-card {
+            width: 14px; height: 20px; background: white; border: 1px solid #666;
+            border-radius: 2px; margin-left: -10px;
+            background: repeating-linear-gradient(45deg, #1e3a8a, 2px, #172554 4px);
+        }
+
+        .pile-area {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 150px; height: 120px; display: flex; justify-content: center; align-items: center;
+        }
+        .played-card { position: absolute; animation: deal 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(250, 204, 21, 0); } 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); } }
+    </style>
+</head>
+<body>
+
+    <!-- --- LOBBY SCREEN --- -->
+    <div id="lobby-screen" class="fixed inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center p-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
+        <h1 class="text-6xl sm:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-red-500 to-yellow-400 mb-2 drop-shadow-lg tracking-tighter">ACE</h1>
+        <p class="text-gray-400 mb-8 tracking-widest uppercase text-sm">The Ultimate Donkey Game</p>
+        
+        <div class="bg-gray-800/90 backdrop-blur p-6 sm:p-8 rounded-3xl shadow-2xl w-full max-w-md border border-gray-700">
+            <div class="flex bg-gray-700 rounded-lg p-1 mb-6">
+                <button onclick="setMode('quick')" id="btn-quick" class="flex-1 py-3 rounded-md font-bold text-sm bg-blue-600 shadow transition">Quick Game</button>
+                <button onclick="setMode('long')" id="btn-long" class="flex-1 py-3 rounded-md font-bold text-sm text-gray-400 hover:text-white transition">Long Run</button>
+            </div>
+            <div class="mb-6 space-y-6">
+                <div>
+                    <div class="flex justify-between text-sm text-gray-400 mb-2"><span>Human Players</span><span id="human-val">1</span></div>
+                    <input type="range" min="1" max="8" value="1" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500" oninput="updateSettings(this.value, 'human')">
+                </div>
+                <div>
+                    <div class="flex justify-between text-sm text-gray-400 mb-2"><span>Total Players</span><span id="total-val">4</span></div>
+                    <input type="range" min="2" max="8" value="4" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500" oninput="updateSettings(this.value, 'total')">
+                </div>
+            </div>
+            <button onclick="startGame()" class="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white text-xl font-bold rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95">DEAL CARDS</button>
+            <button onclick="openOnlineOverlay()" class="w-full mt-3 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold rounded-xl shadow-lg active:scale-95">PLAY ONLINE · 2–8 PLAYERS + BOTS</button>
+            <p class="text-gray-500 text-[10px] text-center mt-2">Offline and online games are separate.</p>
+        </div>
+    </div>
+
+    <!-- --- GAME SCREEN --- -->
+    <div id="game-screen" class="flex-1 flex flex-col hidden relative h-screen">
+        <div class="h-14 bg-gray-900/90 flex items-center justify-between px-3 border-b border-gray-800 z-20 gap-2">
+            <!-- Left -->
+            <div class="flex items-center gap-2">
+                <span class="font-black text-lg text-yellow-500 tracking-tighter">ACE</span>
+                <span class="text-[10px] bg-gray-800 px-1 py-0.5 rounded text-gray-400 border border-gray-700 hidden sm:inline-block" id="mode-display">Quick</span>
+            </div>
+            <!-- Middle -->
+            <div class="flex-1 flex items-center justify-center gap-2 sm:gap-4">
+                <div id="timer-box" class="hidden flex items-center gap-1 bg-gray-800 border border-red-500/50 px-2 py-0.5 rounded shadow-lg">
+                    <i class="fas fa-stopwatch text-red-500 text-xs"></i>
+                    <span id="timer-val" class="font-mono font-bold text-red-400 text-sm">30</span>
+                </div>
+                <div id="suit-indicator" class="hidden flex items-center gap-2 bg-black/60 px-3 py-1 rounded-full border border-white/20 shadow-lg transition-all duration-300">
+                    <span class="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Lead</span>
+                    <span id="leader-name" class="text-xs font-bold text-white truncate max-w-[60px] sm:max-w-[100px]">Player</span>
+                    <span id="lead-icon" class="text-sm font-bold">♠</span>
+                </div>
+            </div>
+            <!-- Right -->
+            <div class="flex items-center gap-2">
+                <div class="text-[10px] font-bold text-blue-300 truncate max-w-[80px]" id="status-text">Init...</div>
+                <button onclick="location.reload()" class="text-gray-500 hover:text-red-500 p-1"><i class="fas fa-power-off"></i></button>
+            </div>
+        </div>
+
+        <!-- Main Table -->
+        <div class="flex-1 flex items-center justify-center bg-gray-900 relative">
+            <div class="game-table" id="table-surface">
+                <div class="pile-area" id="play-pile">
+                    <div class="text-white/10 font-bold text-3xl border-2 border-dashed border-white/10 rounded-lg w-full h-full flex items-center justify-center">ACE</div>
+                </div>
+                <div id="opponents-container"></div>
+            </div>
+        </div>
+
+        <!-- Player Controls & Hand -->
+        <div class="bg-gray-800 border-t border-gray-700 flex flex-col z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+            <div class="h-8 flex items-center justify-between px-4 bg-gray-750 border-b border-gray-700">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-green-500" id="turn-indicator"></div>
+                    <span class="text-xs font-bold text-gray-200" id="player-name">Player 1</span>
+                </div>
+                <!-- Beg Button -->
+                <button id="beg-btn" onclick="initiateBegging()" class="hidden px-2 py-0.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-500 transition active:scale-95 shadow-md border border-purple-400">
+                    <i class="fas fa-praying-hands mr-1"></i> Beg for Cards
+                </button>
+            </div>
+            
+            <!-- Hand Area -->
+            <div class="h-[180px] p-2 bg-gray-800 overflow-y-auto hand-scroll">
+                <div id="my-hand" class="flex flex-wrap justify-center content-start gap-2 px-2 pb-4"></div>
+            </div>
+        </div>
+        
+        <!-- Modals -->
+        <div id="open-card-modal" class="absolute inset-0 z-50 flex items-center justify-center bg-black/80 hidden">
+            <div class="flex flex-col items-center animate-[popIn_0.5s_ease-out]">
+                <h2 class="text-2xl font-bold text-white mb-4">Last Dealt Card</h2>
+                <div id="open-card-display"></div>
+                <button onclick="closeOpenCard()" class="mt-8 px-8 py-3 bg-yellow-500 text-black font-bold rounded-full shadow-lg active:scale-95">Start Game</button>
+            </div>
+        </div>
+
+        <div id="game-over-modal" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 hidden text-center px-4">
+            <div class="text-6xl mb-4">🐴</div>
+            <h1 class="text-5xl font-black text-red-500 mb-2">DONKEY!</h1>
+            <p id="loser-name" class="text-xl text-white mb-8">Player 1 lost the game.</p>
+            <p id="penalty-msg" class="text-sm text-yellow-500 mb-2 hidden"></p>
+            <div id="long-run-controls" class="hidden">
+                <button onclick="nextRound()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg active:scale-95">Next Round</button>
+            </div>
+            <div id="quick-game-controls" class="hidden">
+                 <button onclick="location.reload()" class="px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg shadow-lg active:scale-95">Main Menu</button>
+            </div>
+        </div>
+
+        <!-- Begging Choice Modal -->
+        <div id="beg-choice-modal" class="absolute inset-0 z-50 flex items-center justify-center bg-black/90 hidden">
+            <div class="bg-gray-800 p-6 rounded-2xl shadow-2xl border border-purple-500 text-center max-w-sm w-full mx-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-purple-400">Beg From?</h3>
+                    <div class="text-red-400 font-mono text-lg font-bold"><span id="beg-choice-timer">10</span>s</div>
+                </div>
+                <p class="text-gray-300 text-xs mb-6">Choose a neighbor with ≤ 3 cards.</p>
+                <div class="flex justify-between gap-4">
+                    <button id="beg-left-btn" onclick="" class="flex-1 py-3 bg-blue-600 rounded-lg font-bold hover:bg-blue-500">
+                        <i class="fas fa-arrow-left mr-2"></i> <span id="beg-left-name">Left</span>
+                    </button>
+                    <button id="beg-right-btn" onclick="" class="flex-1 py-3 bg-blue-600 rounded-lg font-bold hover:bg-blue-500">
+                        <span id="beg-right-name">Right</span> <i class="fas fa-arrow-right ml-2"></i>
+                    </button>
+                </div>
+                <button onclick="cancelBegging()" class="mt-6 text-gray-500 text-xs underline">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Beg Request Modal (For Human Target) -->
+        <div id="beg-request-modal" class="absolute inset-0 z-50 flex items-center justify-center bg-black/90 hidden">
+            <div class="bg-gray-800 p-6 rounded-2xl shadow-2xl border border-yellow-500 text-center max-w-sm w-full mx-4">
+                <div class="flex justify-between items-center mb-2">
+                    <div class="text-4xl">🙏</div>
+                    <div class="text-red-400 font-mono text-lg font-bold"><span id="beg-request-timer">10</span>s</div>
+                </div>
+                <h3 class="text-xl font-bold text-yellow-400 mb-2">Beg Request!</h3>
+                <p id="beg-request-text" class="text-white text-sm mb-6">Player X is begging for your cards.</p>
+                <div class="flex gap-4">
+                    <button id="beg-accept-btn" class="flex-1 py-2 bg-green-600 rounded-lg font-bold hover:bg-green-500">Accept</button>
+                    <button id="beg-decline-btn" class="flex-1 py-2 bg-red-600 rounded-lg font-bold hover:bg-red-500">Decline</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Online lobby: separate from the offline game controls -->
+    <div id="online-overlay" class="hidden fixed inset-0 z-[70] bg-black/90 p-3 sm:p-5 flex items-center justify-center">
+      <div class="w-full max-w-md max-h-[94vh] overflow-y-auto bg-gray-900 border border-indigo-500/60 rounded-2xl p-4 sm:p-6 shadow-2xl">
+        <div class="flex justify-between items-center gap-3 mb-2">
+          <div><h2 class="text-2xl font-black text-indigo-300">ACE ONLINE</h2><p class="text-xs text-gray-400">2–8 seats · empty seats filled by AI bots</p></div>
+          <button onclick="closeOnlineOverlay()" class="px-3 py-2 bg-gray-700 rounded-lg text-sm">Close</button>
+        </div>
+        <label class="block text-xs text-gray-300 font-bold mt-4 mb-1" for="online-total-seats">TOTAL MATCH SIZE</label>
+        <select id="online-total-seats" class="w-full rounded-lg p-3 text-black mb-3">
+          <option value="2">2 players</option><option value="3">3 players</option><option value="4" selected>4 players</option><option value="5">5 players</option><option value="6">6 players</option><option value="7">7 players</option><option value="8">8 players</option>
+        </select>
+        <label class="block text-xs text-gray-300 font-bold mt-4 mb-1" for="online-name">YOUR NAME</label>
+        <input id="online-name" maxlength="20" autocomplete="nickname" placeholder="Enter your name" class="w-full rounded-lg p-3 text-black mb-3">
+        <button id="online-create-btn" onclick="onlineCreateRoom()" class="w-full p-3 rounded-lg bg-indigo-600 font-bold">Create Room</button>
+        <div class="flex gap-2 mt-3">
+          <input id="online-room-code" maxlength="6" autocapitalize="characters" placeholder="6-character room code" class="min-w-0 flex-1 rounded-lg p-3 text-black uppercase">
+          <button id="online-join-btn" onclick="onlineJoinRoom()" class="px-4 rounded-lg bg-purple-600 font-bold">Join</button>
+        </div>
+        <div id="online-room-panel" class="hidden mt-4 border border-gray-700 bg-gray-800 rounded-xl p-3">
+          <p class="text-xs text-gray-400">ROOM CODE — share it with your friend</p>
+          <div id="online-room-code-display" class="text-3xl font-black tracking-[.2em] text-yellow-300 py-2">------</div>
+          <p id="online-room-players" class="text-sm text-gray-200">Waiting for players…</p>
+          <button id="online-start-btn" onclick="onlineStartMatch()" class="w-full mt-3 p-3 rounded-lg bg-green-600 font-bold disabled:opacity-40" disabled>Start Match</button>
+          <p id="online-start-hint" class="text-[11px] text-gray-400 mt-2">The host can start with at least 2 humans; remaining seats become bots.</p>
+        </div>
+        <div id="online-message" role="status" aria-live="polite" class="text-xs text-gray-300 mt-4 break-words">Create a room or join your friend's room. Online play requires the updated multiplayer Firebase rules.</div>
+      </div>
+    </div>
+
+    <script>
+        const SUITS = ['♠', '♥', '♣', '♦'];
+        const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+        const RANK = { '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10':10, 'J':11, 'Q':12, 'K':13, 'A':14 };
+
+        let state = {
+            mode: 'quick', humanCount: 1, totalCount: 4, players: [], deck: [], pile: [],
+            turnIndex: 0, startPlayerIndex: 0, leadSuit: null, highestCardInSuit: null, lastCutSuit: null, 
+            roundLoser: null, gameActive: false, roundNumber: 1, winners: [], timerInterval: null, timerSeconds: 30,
+            begTimerInterval: null, // Specific for begging modals
+            begDeclinedThisTurn: false,
+            memory: { voidSuits: {}, suitPlayCount: { '♠': 0, '♥': 0, '♣': 0, '♦': 0 } }
+        };
+
+        function setMode(m) { state.mode = m; document.getElementById('btn-quick').className = m === 'quick' ? "flex-1 py-3 rounded-md font-bold text-sm bg-blue-600 shadow transition" : "flex-1 py-3 rounded-md font-bold text-sm text-gray-400 hover:text-white transition"; document.getElementById('btn-long').className = m === 'long' ? "flex-1 py-3 rounded-md font-bold text-sm bg-purple-600 shadow transition" : "flex-1 py-3 rounded-md font-bold text-sm text-gray-400 hover:text-white transition"; }
+        function updateSettings(val, type) { if (type === 'human') { state.humanCount = parseInt(val); document.getElementById('human-val').textContent = state.humanCount; if (state.totalCount < state.humanCount) { state.totalCount = state.humanCount; document.getElementById('total-val').textContent = state.totalCount; document.querySelectorAll('input')[1].value = state.totalCount; } } else { state.totalCount = parseInt(val); if (state.totalCount < state.humanCount) state.totalCount = state.humanCount; document.getElementById('total-val').textContent = state.totalCount; } }
+
+        function startGame() {
+            if (state.players.length === 0) {
+                for (let i = 0; i < state.totalCount; i++) {
+                    state.players.push({ id: i, name: i < state.humanCount ? `Player ${i+1}` : `Bot ${i+1}`, isBot: i >= state.humanCount, hand: [], penaltyAces: 0, consecutiveCuts: 0, nemesis: null, hasFinished: false });
+                }
+            }
+            document.getElementById('lobby-screen').classList.add('hidden'); document.getElementById('game-screen').classList.remove('hidden'); document.getElementById('game-screen').classList.add('flex'); document.getElementById('mode-display').textContent = state.mode === 'quick' ? 'Quick' : `Long R${state.roundNumber}`;
+            startRound();
+        }
+
+        function startRound() {
+            state.pile = []; state.winners = []; state.leadSuit = null; state.lastCutSuit = null; state.gameActive = true; state.highestCardInSuit = null; state.roundComplete = false; state.gameLoserId = null; state.pendingPrompt = null; state.roundReveal = null; clearOnlinePromptTimer(); resetTimer();
+            state.memory.voidSuits = {}; state.memory.suitPlayCount = { '♠': 0, '♥': 0, '♣': 0, '♦': 0 };
+            state.players.forEach(p => { state.memory.voidSuits[p.id] = new Set(); p.consecutiveCuts = 0; p.nemesis = null; });
+            state.deck = []; for (let s of SUITS) for (let v of VALUES) state.deck.push({ suit: s, value: v, rank: RANK[v], id: `${v}${s}` });
+            state.players.forEach(p => { p.hand = []; p.hasFinished = false; });
+            const acePriority = ['♠', '♥', '♣', '♦'];
+            if (state.mode === 'long' && state.roundNumber > 1) {
+                state.players.forEach(p => { if(p.penaltyAces >= 4) { alert("Game Over! " + p.name + " has collected 4 Aces!"); location.reload(); return; } for(let i=0; i < p.penaltyAces; i++) { let foundAce = null; for(let suit of acePriority) { const idx = state.deck.findIndex(c => c.suit === suit && c.value === 'A'); if(idx > -1) { foundAce = state.deck.splice(idx, 1)[0]; break; } } if(foundAce) p.hand.push(foundAce); } });
+            }
+            state.deck.sort(() => Math.random() - 0.5);
+            const skipCounts = state.players.map(p => p.hand.length); let dealIndex = 0; let lastCard = null; let safetyCounter = 0;
+            while(state.deck.length > 0 && safetyCounter < 1000) { safetyCounter++; const playerIndex = dealIndex % state.players.length; const player = state.players[playerIndex]; if (skipCounts[playerIndex] > 0) { skipCounts[playerIndex]--; dealIndex++; continue; } const card = state.deck.pop(); lastCard = card; player.hand.push(card); dealIndex++; }
+            const lastPlayerIndex = (dealIndex - 1) % state.players.length; const lastPlayerName = state.players[lastPlayerIndex].name;
+            state.players.forEach(p => { p.hand.sort((a, b) => { if (a.suit === b.suit) return b.rank - a.rank; return a.suit.charCodeAt(0) - b.suit.charCodeAt(0); }); });
+            state.roundReveal = { card: lastCard, playerName: lastPlayerName }; const openCardDisplay = document.getElementById('open-card-display'); openCardDisplay.innerHTML = `<div class="flex flex-col items-center gap-4">${renderCardHTML(lastCard, false)}<div class="bg-gray-800 px-4 py-2 rounded-lg border border-gray-600 shadow-lg"><span class="text-gray-400 text-sm">Dealt to</span><div class="text-xl font-bold text-yellow-400">${lastPlayerName}</div></div></div>`;
+            document.getElementById('open-card-modal').classList.remove('hidden');
+            let starter = -1; for(let p of state.players) { if (p.hand.some(c => c.suit === '♠' && c.value === 'A')) { starter = p.id; break; } } if (starter === -1) starter = 0; 
+            state.turnIndex = starter; state.startPlayerIndex = starter; updateUI();
+        }
+
+        function closeOpenCard() { if (isOnlineGame() && !aceOnline.isHost) return; state.roundReveal = null; document.getElementById('open-card-modal').classList.add('hidden'); if (isOnlineGame()) updateUI(); processTurn(); }
+        function startTimer() { resetTimer(); const player = state.players[state.turnIndex]; if (!player || player.isBot) return; if (isOnlineGame() && !aceOnline.isHost) return; document.getElementById('timer-box').classList.remove('hidden'); state.timerSeconds = 30; document.getElementById('timer-val').textContent = state.timerSeconds; if (isOnlineGame()) publishOnlineState(); state.timerInterval = setInterval(() => { state.timerSeconds--; document.getElementById('timer-val').textContent = state.timerSeconds; if (isOnlineGame()) publishOnlineState(); if (state.timerSeconds <= 0) { clearInterval(state.timerInterval); handleTimeout(player); } }, 1000); }
+        function resetTimer() { if (state.timerInterval) clearInterval(state.timerInterval); document.getElementById('timer-box').classList.add('hidden'); }
+        function handleTimeout(player) { pulseMessage("Time's Up!"); const hand = player.hand; let validCards = []; if (state.pile.length > 0) { validCards = hand.filter(c => c.suit === state.leadSuit); if (validCards.length === 0) validCards = [...hand]; } else { validCards = [...hand]; } validCards.sort((a,b) => b.rank - a.rank); const cardToPlay = validCards[0]; playCard(player.id, hand.indexOf(cardToPlay)); }
+
+        // --- BEG FOR CARDS LOGIC ---
+        function getNeighbors(pid) {
+            const active = state.players.filter(p => !p.hasFinished);
+            const myIdx = active.findIndex(p => p.id === pid);
+            if (myIdx === -1) return { left: null, right: null };
+            const left = active[(myIdx - 1 + active.length) % active.length];
+            const right = active[(myIdx + 1) % active.length];
+            return { left, right };
+        }
+
+        function initiateBegging() {
+            if (isOnlineGame()) { if (!aceOnline.isHost) { sendOnlineAction('begStart', {}); return; } startBeggingFor(aceOnline.playerIndex); return; }
+            if (state.begDeclinedThisTurn) { pulseMessage("Declined! Wait for next turn."); return; }
+            resetTimer(); // Pause Main Turn Timer
+            const me = state.players[0];
+            const { left, right } = getNeighbors(me.id);
+            
+            const leftEligible = left && left.id !== me.id && left.hand.length > 0 && left.hand.length <= 3;
+            const rightEligible = right && right.id !== me.id && right.hand.length > 0 && right.hand.length <= 3;
+
+            if (!leftEligible && !rightEligible) { 
+                pulseMessage("No neighbors with 1-3 cards!"); 
+                startTimer(); // Resume turn
+                return; 
+            }
+
+            if (leftEligible && rightEligible) {
+                // Show Choice
+                document.getElementById('beg-left-name').textContent = left.name;
+                document.getElementById('beg-right-name').textContent = right.name;
+                
+                // Clear old clicks
+                const btnLeft = document.getElementById('beg-left-btn');
+                const btnRight = document.getElementById('beg-right-btn');
+                btnLeft.onclick = () => { clearBegTimers(); document.getElementById('beg-choice-modal').classList.add('hidden'); requestBeg(left.id); };
+                btnRight.onclick = () => { clearBegTimers(); document.getElementById('beg-choice-modal').classList.add('hidden'); requestBeg(right.id); };
+                
+                document.getElementById('beg-choice-modal').classList.remove('hidden');
+                startBegTimer('beg-choice-timer', cancelBegging); // 10s for choice
+            } else if (leftEligible) { requestBeg(left.id); } 
+            else { requestBeg(right.id); }
+        }
+
+        function startBegTimer(elemId, callback) {
+            clearBegTimers();
+            let seconds = 10;
+            document.getElementById(elemId).textContent = seconds;
+            state.begTimerInterval = setInterval(() => {
+                seconds--;
+                document.getElementById(elemId).textContent = seconds;
+                if (seconds <= 0) {
+                    clearBegTimers();
+                    callback();
+                }
+            }, 1000);
+        }
+
+        function clearBegTimers() {
+            if (state.begTimerInterval) clearInterval(state.begTimerInterval);
+        }
+
+        function cancelBegging() {
+            if (isOnlineGame()) { if (!aceOnline.isHost) { sendOnlineAction('begCancel', {}); return; } clearOnlinePromptTimer(); state.pendingPrompt = null; document.getElementById('beg-choice-modal').classList.add('hidden'); document.getElementById('beg-request-modal').classList.add('hidden'); startTimer(); updateUI(); return; }
+            document.getElementById('beg-choice-modal').classList.add('hidden');
+            document.getElementById('beg-request-modal').classList.add('hidden');
+            pulseMessage("Time's up / Cancelled");
+            startTimer(); // Resume Main Turn
+        }
+
+        function requestBeg(targetId) {
+            if (isOnlineGame()) { startBegRequest(state.turnIndex, targetId); return; }
+            const target = state.players[targetId];
+            const beggar = state.players[state.turnIndex];
+
+            if (target.isBot) {
+                const avgRank = target.hand.reduce((sum, c) => sum + c.rank, 0) / target.hand.length;
+                const acceptChance = avgRank > 8 ? 0.9 : 0.4; 
+                const accepted = Math.random() < acceptChance;
+                
+                setTimeout(() => finalizeBeg(targetId, accepted), 1000);
+                updateStatus("Asking " + target.name + "...");
+            } else {
+                // Human Target
+                document.getElementById('beg-request-text').textContent = `${beggar.name} is begging for your cards!`;
+                
+                const btnAccept = document.getElementById('beg-accept-btn');
+                const btnDecline = document.getElementById('beg-decline-btn');
+                
+                btnAccept.onclick = () => { clearBegTimers(); document.getElementById('beg-request-modal').classList.add('hidden'); finalizeBeg(targetId, true); };
+                btnDecline.onclick = () => { clearBegTimers(); document.getElementById('beg-request-modal').classList.add('hidden'); finalizeBeg(targetId, false); };
+                
+                document.getElementById('beg-request-modal').classList.remove('hidden');
+                startBegTimer('beg-request-timer', () => { 
+                    document.getElementById('beg-request-modal').classList.add('hidden');
+                    finalizeBeg(targetId, false); // Auto-Decline on timeout
+                });
+            }
+        }
+
+        function finalizeBeg(targetId, accepted) {
+            if (isOnlineGame()) { onlineFinalizeBeg(targetId, accepted); return; }
+            clearBegTimers(); // Ensure cleanup
+            const target = state.players[targetId];
+            const beggar = state.players[state.turnIndex];
+
+            if (accepted) {
+                pulseMessage(`${beggar.name} begged cards from ${target.name}!`);
+                beggar.hand.push(...target.hand);
+                target.hand = [];
+                target.hasFinished = true;
+                state.winners.push(target.id);
+                beggar.hand.sort((a,b) => { if (a.suit === b.suit) return b.rank - a.rank; return a.suit.charCodeAt(0) - b.suit.charCodeAt(0); });
+                checkWinConditions();
+                updateUI();
+                
+                if (beggar.isBot) {
+                    setTimeout(botPlay, 1000);
+                } else {
+                    startTimer();
+                }
+            } else {
+                state.begDeclinedThisTurn = true;
+                pulseMessage(`${target.name} Declined!`);
+                updateUI();
+                
+                if (beggar.isBot) {
+                    setTimeout(botPlay, 1000);
+                } else {
+                    startTimer();
+                }
+            }
+        }
+
+        // --- GAME LOGIC ---
+
+        function processTurn() {
+            if (!state.gameActive) return;
+            const player = state.players[state.turnIndex];
+            state.begDeclinedThisTurn = false; 
+            
+            if (player.hasFinished) { advanceTurn(); return; }
+            updateUI(); updateStatus(`${player.name}'s turn`);
+            if (player.isBot) { setTimeout(botPlay, 1000); } else { startTimer(); }
+        }
+
+        function botPlay() {
+            if (!state.gameActive) return;
+            const myIndex = state.turnIndex; const player = state.players[myIndex]; const hand = player.hand;
+            
+            // BOT BEGGING LOGIC
+            const activePlayers = state.players.filter(p => !p.hasFinished).length;
+            if (!state.begDeclinedThisTurn && activePlayers > 2 && player.consecutiveCuts >= 1) { 
+                const { left, right } = getNeighbors(player.id);
+                let targetId = null;
+                // Prioritize checking neighbors with 1-3 cards
+                if (left && left.hand.length > 0 && left.hand.length <= 3) targetId = left.id;
+                else if (right && right.hand.length > 0 && right.hand.length <= 3) targetId = right.id;
+                
+                if (targetId !== null && Math.random() > 0.3) { 
+                    console.log("Bot trying to beg");
+                    requestBeg(targetId);
+                    return; // Wait for beg resolution
+                }
+            }
+
+            let nextIndex = (myIndex + 1) % state.players.length; while (state.players[nextIndex].hasFinished) nextIndex = (nextIndex + 1) % state.players.length;
+            let afterNextIndex = (nextIndex + 1) % state.players.length; while (state.players[afterNextIndex].hasFinished) afterNextIndex = (afterNextIndex + 1) % state.players.length;
+            let cardToPlay = null;
+
+            if (state.pile.length === 0) {
+                // FIXED: Removed forced Ace of Spades logic so strategies apply
+                const nextPlayerVoidSuits = state.memory.voidSuits[nextIndex] || new Set();
+                const afterNextPlayerVoidSuits = state.memory.voidSuits[afterNextIndex] || new Set();
+                const activePlayersList = state.players.filter(p => !p.hasFinished);
+                const isCrowdedGame = activePlayersList.length >= 6; const isSmallHand = player.hand.length < 6;
+                const isTraumatized = player.consecutiveCuts >= 2;
+                const prioritizeSafety = isCrowdedGame || isSmallHand || isTraumatized;
+                const isNemesisNext = (nextIndex === player.nemesis);
+                const suitsInHand = {}; hand.forEach(c => { if(!suitsInHand[c.suit]) suitsInHand[c.suit] = []; suitsInHand[c.suit].push(c); });
+                let bestCandidate = null; let bestScore = -Infinity;
+
+                for (let suit in suitsInHand) {
+                    const cards = suitsInHand[suit]; const playedCount = state.memory.suitPlayCount[suit] || 0; const myCount = cards.length; const unknownCards = 13 - playedCount - myCount; const activeOpponents = activePlayersList.length - 1; const avgPerOpponent = activeOpponents > 0 ? (unknownCards / activeOpponents) : 0;
+                    const isNextVoid = nextPlayerVoidSuits.has(suit); if (isNextVoid) continue; 
+                    let riskLevel = avgPerOpponent < 1.0 ? 'HIGH' : 'LOW'; if (isTraumatized) riskLevel = 'HIGH';
+                    const isBaitOpp = !isNextVoid && afterNextPlayerVoidSuits.has(suit);
+                    cards.forEach(c => {
+                        let score = 0;
+                        if (isNemesisNext && isBaitOpp) { score += 100; score += (15 - c.rank); }
+                        else if (isNemesisNext) { score += 50; score += (15 - c.rank); }
+                        else if (prioritizeSafety || riskLevel === 'HIGH') { if (c.rank < 7) { score += 60; score += (10 - c.rank); } else { score -= 20; score -= c.rank; } if (isBaitOpp) score += 20; } 
+                        else { if (isBaitOpp) { score += 50; score += (15 - c.rank); } else { score += 20; score += c.rank; } }
+                        if(score > bestScore) { bestScore = score; bestCandidate = c; }
+                    });
+                }
+                if (!bestCandidate) { hand.sort((a,b) => a.rank - b.rank); bestCandidate = hand[0]; }
+                cardToPlay = bestCandidate;
+            } else {
+                const suitCards = hand.filter(c => c.suit === state.leadSuit);
+                if (suitCards.length > 0) {
+                    let pileMaxRank = 0; state.pile.forEach(p => { if(p.card.rank > pileMaxRank) pileMaxRank = p.card.rank; });
+                    suitCards.sort((a,b) => b.rank - a.rank); const myMax = suitCards[0]; const myMin = suitCards[suitCards.length - 1];
+                    if (myMax.rank > pileMaxRank) { cardToPlay = myMax; } else { cardToPlay = myMin; }
+                } else { hand.sort((a,b) => b.rank - a.rank); cardToPlay = hand[0]; }
+            }
+            if (cardToPlay) { playCard(state.turnIndex, hand.indexOf(cardToPlay)); }
+        }
+
+        function playCard(pIndex, cIndex) {
+            if (isOnlineGame() && !aceOnline.isHost) { if (pIndex !== aceOnline.playerIndex || state.turnIndex !== aceOnline.playerIndex) { pulseMessage('Wait for your turn'); return; } const localCard = state.players[aceOnline.playerIndex] && state.players[aceOnline.playerIndex].hand[cIndex]; if (!localCard || !localCard.id) return; sendOnlineAction('playCard', { cardId: localCard.id }); return; }
+            resetTimer(); const player = state.players[pIndex]; const card = player && player.hand[cIndex]; if (!card) return;
+            
+            // FREE WILL CHECK (No block for humans)
+            // But we need to check for Penalty (Mistake) if suit doesn't match lead
+            
+            state.memory.suitPlayCount[card.suit]++; 
+            // We need to check for revoke BEFORE splicing, or use logic after.
+            // Let's grab the suit status before we remove the card.
+            const hasLeadSuit = state.leadSuit && player.hand.some(c => c.suit === state.leadSuit);
+            const playedWrongSuit = state.leadSuit && card.suit !== state.leadSuit;
+            const isMistake = playedWrongSuit && hasLeadSuit;
+
+            player.hand.splice(cIndex, 1); 
+            state.pile.push({ card, playerId: pIndex });
+            
+            if (state.pile.length === 1) { 
+                state.leadSuit = card.suit; 
+                state.highestCardInSuit = { rank: card.rank, playerId: pIndex }; 
+            } 
+            else { 
+                if (card.suit !== state.leadSuit) { 
+                    if (isMistake) {
+                        handleRevoke(pIndex); // New Penalty Logic
+                        return;
+                    }
+                    // Valid Cut
+                    if (!state.memory.voidSuits[pIndex]) state.memory.voidSuits[pIndex] = new Set(); 
+                    state.memory.voidSuits[pIndex].add(state.leadSuit); 
+                    handleCut(pIndex, card); 
+                    return; 
+                } 
+                if (card.rank > state.highestCardInSuit.rank) { 
+                    state.highestCardInSuit = { rank: card.rank, playerId: pIndex }; 
+                } 
+            }
+            updateUI(); 
+            const activePlayers = state.players.filter(p => !p.hasFinished).length;
+            if (state.pile.length === activePlayers) { setTimeout(resolveCleanTrick, 1000); } else { advanceTurn(); }
+        }
+
+        function handleRevoke(playerId) {
+            updateUI();
+            updateStatus("MISTAKE!");
+            const penaltyPlayer = state.players[playerId];
+            pulseMessage("Wrong Move! You pick up!");
+            
+            setTimeout(() => {
+                const cardsToPickup = state.pile.map(p => p.card);
+                penaltyPlayer.hand.push(...cardsToPickup);
+                penaltyPlayer.hand.sort((a, b) => b.rank - a.rank);
+                
+                // Reset Round
+                state.pile = []; 
+                state.leadSuit = null; 
+                state.highestCardInSuit = null;
+                
+                // Penalty player leads next
+                state.turnIndex = playerId; 
+                state.startPlayerIndex = playerId; 
+                
+                checkWinConditions(); 
+                updateUI(); 
+                processTurn();
+            }, 1500);
+        }
+
+        function handleCut(cutterIndex, cutCard) {
+            updateUI(); updateStatus("CUT!"); state.lastCutSuit = state.leadSuit;
+            const loserId = state.highestCardInSuit.playerId; const loser = state.players[loserId];
+            loser.consecutiveCuts++; if (loser.isBot) { loser.nemesis = cutterIndex; }
+            setTimeout(() => { const cardsToPickup = state.pile.map(p => p.card); loser.hand.push(...cardsToPickup); loser.hand.sort((a, b) => b.rank - a.rank); state.pile = []; state.leadSuit = null; state.highestCardInSuit = null; state.turnIndex = loserId; state.startPlayerIndex = loserId; checkWinConditions(); updateUI(); processTurn(); }, 1500);
+        }
+
+        function resolveCleanTrick() {
+            const winnerId = state.highestCardInSuit.playerId; state.pile = []; state.leadSuit = null; state.highestCardInSuit = null; state.lastCutSuit = null; state.players[winnerId].consecutiveCuts = 0; updateStatus(`${state.players[winnerId].name} wins!`); state.turnIndex = winnerId; state.startPlayerIndex = winnerId; checkWinConditions(); updateUI(); if (state.gameActive) { setTimeout(processTurn, 500); }
+        }
+
+        function advanceTurn() {
+            let nextIndex = (state.turnIndex + 1) % state.players.length; let attempts = 0;
+            while (state.players[nextIndex].hasFinished && attempts < state.players.length) { nextIndex = (nextIndex + 1) % state.players.length; attempts++; }
+            state.turnIndex = nextIndex; processTurn();
+        }
+
+        function checkWinConditions() {
+            state.players.forEach(p => { if (!p.hasFinished && p.hand.length === 0) { p.hasFinished = true; state.winners.push(p.id); } });
+            const activePlayers = state.players.filter(p => !p.hasFinished); if (activePlayers.length <= 1) { endGame(activePlayers[0]); }
+        }
+
+        function askForCards() { initiateBegging(); }
+
+        function endGame(loser) {
+            state.gameActive = false; state.roundComplete = true; state.gameLoserId = loser ? loser.id : null; resetTimer(); const loserName = loser ? loser.name : "Nobody"; document.getElementById('loser-name').textContent = `${loserName} is the Donkey!`; const msgEl = document.getElementById('penalty-msg'); msgEl.textContent = ""; document.getElementById('game-over-modal').classList.remove('hidden'); document.getElementById('game-over-modal').classList.add('flex');
+            if (state.mode === 'long') { document.getElementById('long-run-controls').classList.remove('hidden'); state.roundLoser = loser ? loser.id : 0; const p = state.players[state.roundLoser]; const nextAces = p.penaltyAces + 1; if(nextAces >= 4) { msgEl.textContent = `${p.name} has reached 4 Aces and is OUT!`; msgEl.classList.remove('hidden'); } else { msgEl.textContent = `${p.name} will start next round with ${nextAces} Ace(s).`; msgEl.classList.remove('hidden'); } } else { document.getElementById('quick-game-controls').classList.remove('hidden'); }
+        }
+
+        function nextRound() {
+            if (isOnlineGame() && !aceOnline.isHost) { pulseMessage('The host controls the next round.'); return; }
+            state.roundNumber++; state.players[state.roundLoser].penaltyAces++; state.players.forEach(p => { if (p.id !== state.roundLoser && p.penaltyAces > 0) { p.penaltyAces--; } }); document.getElementById('game-over-modal').classList.add('hidden'); startRound();
+        }
+
+        function updateUI() {
+            const localPlayerIndex = isOnlineGame() ? aceOnline.playerIndex : 0;
+            const pileContainer = document.getElementById('play-pile');
+            pileContainer.innerHTML = '';
+            if (!state.pile.length && isOnlineGame()) {
+                const empty = document.createElement('div'); empty.className = 'text-white/10 font-bold text-3xl border-2 border-dashed border-white/10 rounded-lg w-full h-full flex items-center justify-center'; empty.textContent = 'ACE'; pileContainer.appendChild(empty);
+            }
+            state.pile.forEach((play, index) => { const el = document.createElement('div'); el.className = 'played-card card'; el.innerHTML = renderCardInner(play.card); const rot = (index * 10) - ((state.pile.length-1)*5); el.style.transform = `rotate(${rot}deg) translate(${index*2}px, -${index*2}px)`; pileContainer.appendChild(el); });
+            const suitInd = document.getElementById('suit-indicator');
+            if (state.leadSuit) { suitInd.classList.remove('hidden'); document.getElementById('lead-icon').textContent = state.leadSuit; document.getElementById('lead-icon').className = (state.leadSuit === '♥' || state.leadSuit === '♦') ? 'text-red-500' : 'text-blue-300'; const leaderNameEl = document.getElementById('leader-name'); if (state.highestCardInSuit) { const leader = state.players[state.highestCardInSuit.playerId]; leaderNameEl.textContent = leader ? leader.name : '...'; } else { leaderNameEl.textContent = '...'; } } else { suitInd.classList.add('hidden'); }
+            const handContainer = document.getElementById('my-hand'); handContainer.innerHTML = '';
+            const myPlayer = state.players[localPlayerIndex];
+            if (!myPlayer) { handContainer.textContent = isOnlineGame() ? 'Connecting to game…' : ''; }
+            else if (myPlayer.hasFinished) { handContainer.innerHTML = '<div class="text-green-500 font-bold text-xl text-center w-full mt-4">YOU WON!</div>'; }
+            else if (isOnlineGame() && !aceOnline.isHost && !aceOnline.privateHandReady) { handContainer.innerHTML = '<div class="text-gray-400 text-sm mt-4">Loading your private hand…</div>'; }
+            else { myPlayer.hand.forEach((card, index) => { if (!card || !card.id) return; const disabled = isOnlineGame() ? (state.turnIndex !== localPlayerIndex || !state.gameActive || !!state.pendingPrompt) : (state.turnIndex !== 0); const el = document.createElement('div'); el.className = `card card-sm cursor-pointer ${disabled ? 'disabled' : ''}`; el.innerHTML = renderCardInner(card); if (!disabled) el.onclick = () => playCard(localPlayerIndex, index); handContainer.appendChild(el); }); }
+            const begBtn = document.getElementById('beg-btn');
+            const activePlayers = state.players.filter(p => !p.hasFinished).length;
+            if (myPlayer && state.turnIndex === localPlayerIndex && !myPlayer.hasFinished && state.gameActive && activePlayers > 2 && !state.pendingPrompt) { begBtn.classList.remove('hidden'); } else { begBtn.classList.add('hidden'); }
+            renderOpponents();
+            const mine = state.turnIndex === localPlayerIndex;
+            document.getElementById('turn-indicator').className = `w-3 h-3 rounded-full ${mine ? 'bg-green-500 shadow-[0_0_10px_lime]' : 'bg-gray-600'}`;
+            document.getElementById('player-name').textContent = mine ? 'Your Turn' : `${state.players[state.turnIndex] ? state.players[state.turnIndex].name : 'Opponent'}'s Turn`;
+            if (isOnlineGame()) {
+                const turnPlayer = state.players[state.turnIndex];
+                const showTimer = !!(turnPlayer && !turnPlayer.isBot && state.gameActive && !state.roundReveal && !state.pendingPrompt && (aceOnline.isHost || mine));
+                document.getElementById('timer-box').classList.toggle('hidden', !showTimer);
+                document.getElementById('timer-val').textContent = String(state.timerSeconds || 30);
+                syncOnlineModals();
+                if (aceOnline.isHost) publishOnlineState();
+            }
+        }
+
+        function renderOpponents() {
+            const container = document.getElementById('opponents-container'); container.innerHTML = '';
+            const localPlayerIndex = isOnlineGame() ? aceOnline.playerIndex : 0;
+            const others = isOnlineGame() ? state.players.filter(p => p.id !== localPlayerIndex) : state.players.slice(1);
+            if (others.length === 0) return;
+            const radiusX = 40; const radiusY = 35; const centerX = 50; const centerY = 50; const angleStep = 180 / (others.length + 1);
+            others.forEach((p, i) => { const angleDeg = 180 + (angleStep * (i + 1)); const rad = angleDeg * (Math.PI / 180); const left = centerX + (radiusX * Math.cos(rad)); const top = centerY + (radiusY * Math.sin(rad)); const el = document.createElement('div'); el.className = 'player-seat'; el.style.left = `${left}%`; el.style.top = `${top}%`; el.style.transform = 'translate(-50%, -50%)'; let statusClass = ''; if (state.turnIndex === p.id) statusClass = 'active-turn'; if (p.hasFinished) statusClass = 'winner'; let aceBadges = ''; if(state.mode === 'long' && p.penaltyAces > 0) { aceBadges = `<div class="absolute -top-4 bg-red-600 text-[10px] px-1 rounded text-white font-bold">ACES: ${p.penaltyAces}</div>`; } el.innerHTML = `<div class="avatar ${statusClass} ${p.id === state.startPlayerIndex && state.pile.length > 0 ? 'border-blue-500' : ''}">${p.isBot ? '<i class="fas fa-robot text-gray-400"></i>' : '<i class="fas fa-user"></i>'}${p.hasFinished ? '<i class="fas fa-check text-green-500 absolute text-3xl"></i>' : ''}</div>${aceBadges}<div class="player-badge">${p.hand.length}</div><div class="mini-card-stack mt-1">${!p.hasFinished ? Array(Math.min(p.hand.length, 5)).fill('<div class="mini-card"></div>').join('') : ''}</div><div class="bg-black/50 text-white text-[10px] px-2 rounded mt-1 truncate max-w-[70px] text-center">${p.name}</div>`; container.appendChild(el); });
+        }
+
+        function renderCardHTML(card, isSmall) { if (!card) return ''; const isRed = (card.suit === '♥' || card.suit === '♦'); const colorClass = isRed ? 'text-red-500' : 'text-gray-800'; return `<div class="card ${isSmall ? 'scale-75' : 'scale-125'}"><div class="card-value ${colorClass}">${card.value}</div><div class="card-center ${colorClass}">${card.suit}</div><div class="card-suit ${colorClass} text-right rotate-180">${card.suit}</div></div>`; }
+        function renderCardInner(card) { const isRed = (card.suit === '♥' || card.suit === '♦'); const colorClass = isRed ? 'card-red' : 'card-black'; return `<div class="card-value ${colorClass}">${card.value}</div><div class="card-center ${colorClass}">${card.suit}</div><div class="card-suit ${colorClass} text-right rotate-180">${card.suit}</div>`; }
+        function updateStatus(msg) { document.getElementById('status-text').textContent = msg; }
+        function pulseMessage(msg) { const el = document.getElementById('status-text'); const original = el.textContent; el.textContent = msg; el.className = "text-[10px] font-bold text-red-500 animate-pulse"; setTimeout(() => { el.textContent = original; el.className = "text-[10px] font-bold text-blue-300"; }, 1500); }
+
+
+        // ---------------- ACE ONLINE MULTIPLAYER LAYER ----------------
+        // The host is authoritative and executes the original game engine. Only public
+        // gameplay state is shared; full hands live under privateHands/{room}/{uid}.
+        const ACE_FIREBASE_CONFIG = {
+          apiKey: "AIzaSyBsFFnKp3H853juy_pRaFypw0u8xf4PFmc",
+          authDomain: "ace-game-77144.firebaseapp.com",
+          databaseURL: "https://ace-game-77144-default-rtdb.firebaseio.com",
+          projectId: "ace-game-77144",
+          storageBucket: "ace-game-77144.firebasestorage.app",
+          messagingSenderId: "512301578432",
+          appId: "1:512301578432:web:8cbed656a8ac3cce9b1525"
+        };
+        const aceOnline = {
+          uid: null, db: null, roomCode: null, role: null, isHost: false, started: false,
+          playerIndex: 0, playerUids: [], roomRef: null, roomListener: null,
+          publicRevision: 0, lastPublicRevision: -1, lastPublic: null,
+          privateHand: [], privateHandReady: false, privateHandRevision: -1,
+          actionRefs: [], promptTimeout: null, promptDisplayInterval: null,
+          renderedPromptKey: '', startInProgress: false, localRoom: null
+        };
+        function isOnlineGame() { return !!(aceOnline.started && aceOnline.db && aceOnline.roomCode); }
+        function onlineMessage(msg, isError=false) { const el=document.getElementById('online-message'); if(el){el.textContent=msg;el.className='text-xs mt-4 break-words '+(isError?'text-red-300':'text-gray-300');} }
+        function openOnlineOverlay() { document.getElementById('online-overlay').classList.remove('hidden'); }
+        function closeOnlineOverlay() { document.getElementById('online-overlay').classList.add('hidden'); }
+        function aceRandomCode() { const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let out=''; for(let i=0;i<6;i++) out+=chars[Math.floor(Math.random()*chars.length)]; return out; }
+        async function aceConnectFirebase() {
+          if (!firebase.apps.length) firebase.initializeApp(ACE_FIREBASE_CONFIG);
+          const auth=firebase.auth();
+          let user=auth.currentUser;
+          if(!user) { const result=await auth.signInAnonymously(); user=result.user; }
+          if(!user) throw new Error('Firebase anonymous sign-in did not return a user.');
+          aceOnline.uid=user.uid; aceOnline.db=firebase.database();
+          return aceOnline.db;
+        }
+        async function onlineCreateRoom() {
+          const createBtn=document.getElementById('online-create-btn');
+          try {
+            createBtn.disabled=true;
+            const db=await aceConnectFirebase();
+            const name=(document.getElementById('online-name').value||'Host').trim().replace(/\s+/g,' ').slice(0,20)||'Host';
+            let code='', ref, committed=false;
+            for(let attempt=0;attempt<8;attempt++) {
+              code=aceRandomCode(); ref=db.ref('rooms/'+code);
+              const result=await ref.transaction(current=>current===null?{
+                code, hostUid:aceOnline.uid, mode:state.mode, totalSeats:Math.max(2,Math.min(8,Number(document.getElementById('online-total-seats').value)||4)), status:'waiting', createdAt:Date.now(),
+                players:{[aceOnline.uid]:{name,joinedAt:Date.now()}}
+              }:undefined);
+              if(result.committed){committed=true;break;}
+            }
+            if(!committed) throw new Error('Could not allocate a room code. Try again.');
+            attachOnlineRoom(code,true);
+            onlineMessage('Room created. Share the code and wait for one friend to join.');
+          } catch(e) { onlineMessage('Room creation failed: '+(e.message||e),true); }
+          finally { createBtn.disabled=false; }
+        }
+        async function onlineJoinRoom() {
+          const joinBtn=document.getElementById('online-join-btn');
+          try {
+            joinBtn.disabled=true;
+            const db=await aceConnectFirebase();
+            const code=(document.getElementById('online-room-code').value||'').trim().toUpperCase();
+            const name=(document.getElementById('online-name').value||'Player 2').trim().replace(/\s+/g,' ').slice(0,20)||'Player 2';
+            if(!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) throw new Error('Enter the six-character room code.');
+            const ref=db.ref('rooms/'+code), snap=await ref.once('value');
+            if(!snap.exists()) throw new Error('Room not found. Check the code.');
+            const room=snap.val();
+            const players=room.players||{};
+            if(room.status==='started') {
+              if(players[aceOnline.uid] && room.hostUid!==aceOnline.uid && room.seatPlan) { attachOnlineRoom(code,false); return; }
+              throw new Error('This room has already started. The host must keep the game tab open; a guest can rejoin using the same browser session.');
+            }
+            if(players[aceOnline.uid]) { attachOnlineRoom(code,room.hostUid===aceOnline.uid); return; }
+            const totalSeats=Math.max(2,Math.min(8,Number(room.totalSeats)||4));
+            if(Object.keys(players).length>=totalSeats) throw new Error('This room has reached its selected player limit ('+totalSeats+').');
+            await ref.child('players/'+aceOnline.uid).set({name,joinedAt:Date.now()});
+            attachOnlineRoom(code,room.hostUid===aceOnline.uid);
+            onlineMessage('Joined room '+code+'. Waiting for the host to start.');
+          } catch(e) { onlineMessage('Join failed: '+(e.message||e),true); }
+          finally { joinBtn.disabled=false; }
+        }
+        function attachOnlineRoom(code,isHost) {
+          if(aceOnline.roomRef && aceOnline.roomListener) aceOnline.roomRef.off('value',aceOnline.roomListener);
+          aceOnline.roomCode=code; aceOnline.isHost=!!isHost; aceOnline.role=isHost?'host':'guest';
+          aceOnline.roomRef=aceOnline.db.ref('rooms/'+code);
+          document.getElementById('online-room-panel').classList.remove('hidden');
+          document.getElementById('online-room-code-display').textContent=code;
+          document.getElementById('online-room-code').value=code;
+          // Best-effort player cleanup while still in the waiting lobby.
+          aceOnline.db.ref(`rooms/${code}/players/${aceOnline.uid}`).onDisconnect().remove().catch(()=>{});
+          aceOnline.roomListener=snap=>{
+            if(!snap.exists()){onlineMessage('The room was removed. Create or join another room.',true);return;}
+            const room=snap.val(); aceOnline.localRoom=room;
+            const list=Object.values(room.players||{});
+            const totalSeats=Math.max(2,Math.min(8,Number(room.totalSeats)||4));
+            document.getElementById('online-room-players').textContent=`${list.length}/${totalSeats} seats selected · ${Math.max(0,totalSeats-list.length)} bot${totalSeats-list.length===1?'':'s'} will fill empty seats: ${list.map(p=>p.name||'Player').join(', ')||'none'}`;
+            const startBtn=document.getElementById('online-start-btn');
+            startBtn.disabled=!aceOnline.isHost||list.length<2||list.length>totalSeats||room.status==='started';
+            startBtn.textContent=room.status==='started'?'Match Starting…':(aceOnline.isHost?'Start Match ('+list.length+' humans + '+Math.max(0,totalSeats-list.length)+' bots)':'Waiting for Host…');
+            document.getElementById('online-start-hint').textContent=aceOnline.isHost?(list.length>=2?'Ready. Start when the humans who want to join are connected.':'At least 2 humans must be connected.'): 'Join with the room code; the host can start once at least 2 humans are connected.';
+            if(room.status==='started' && room.seatPlan && !aceOnline.started && !aceOnline.startInProgress) beginOnlineGame(room).catch(e=>onlineMessage('Could not initialize the game: '+e.message,true));
+          };
+          aceOnline.roomRef.on('value',aceOnline.roomListener,err=>onlineMessage('Room listener failed: '+err.message,true));
+        }
+        async function onlineStartMatch() {
+          try {
+            if(!aceOnline.isHost||!aceOnline.roomRef) throw new Error('Only the room host can start the match.');
+            const snap=await aceOnline.roomRef.once('value'); if(!snap.exists()) throw new Error('Room no longer exists.');
+            const room=snap.val(); if(room.hostUid!==aceOnline.uid) throw new Error('Host verification failed.');
+            const totalSeats=Math.max(2,Math.min(8,Number(room.totalSeats)||4));
+            const entries=Object.entries(room.players||{}).sort((a,b)=>a[0]===room.hostUid?-1:(b[0]===room.hostUid?1:(a[1].joinedAt||0)-(b[1].joinedAt||0)));
+            if(entries.length<2) throw new Error('At least two human players must be connected before starting.');
+            if(entries.length>totalSeats) throw new Error('There are more humans connected than the selected match size.');
+            const humans=entries.map(([uid,p])=>({uid,name:String(p.name||'Player').slice(0,20),isBot:false}));
+            const seatPlan=[...humans];
+            while(seatPlan.length<totalSeats) { const seat=seatPlan.length; seatPlan.push({uid:null,name:'Bot '+(seat+1),isBot:true}); }
+            await aceOnline.roomRef.update({status:'started',startedAt:Date.now(),seatPlan});
+            onlineMessage('Match starting with '+humans.length+' humans and '+(totalSeats-humans.length)+' bots…');
+          } catch(e) { onlineMessage('Could not start match: '+(e.message||e),true); }
+        }
+        function freshOnlineState(mode,seatPlan) {
+          const players=(seatPlan||[]).map((p,id)=>({id,name:p.name||`Player ${id+1}`,uid:p.isBot?null:p.uid,isBot:!!p.isBot,hand:[],penaltyAces:0,consecutiveCuts:0,nemesis:null,hasFinished:false}));
+          return {mode:mode==='long'?'long':'quick',humanCount:players.filter(p=>!p.isBot).length,totalCount:players.length,players,deck:[],pile:[],turnIndex:0,startPlayerIndex:0,leadSuit:null,highestCardInSuit:null,lastCutSuit:null,roundLoser:null,gameLoserId:null,gameActive:false,roundComplete:false,roundNumber:1,winners:[],timerInterval:null,timerSeconds:30,begTimerInterval:null,begDeclinedThisTurn:false,pendingPrompt:null,roundReveal:null,memory:{voidSuits:{},suitPlayCount:{'♠':0,'♥':0,'♣':0,'♦':0}}};
+        }
+        async function beginOnlineGame(room) {
+          if(aceOnline.startInProgress||aceOnline.started) return; aceOnline.startInProgress=true;
+          try {
+            const seatPlan=room.seatPlan||[];
+            const humans=seatPlan.filter(p=>!p.isBot);
+            if(humans.length<2||seatPlan.length<2||seatPlan.length>8) throw new Error('Room must contain 2–8 total seats and at least two humans.');
+            const localIdx=seatPlan.findIndex(p=>!p.isBot&&p.uid===aceOnline.uid);
+            if(localIdx<0) throw new Error('Your Firebase user is not assigned to this room. Rejoin the room.');
+            aceOnline.playerIndex=localIdx; aceOnline.playerUids=seatPlan.map(p=>p.isBot?null:p.uid); aceOnline.isHost=room.hostUid===aceOnline.uid; aceOnline.role=aceOnline.isHost?'host':'guest';
+            aceOnline.started=true; aceOnline.publicRevision=0; aceOnline.lastPublicRevision=-1; aceOnline.privateHandReady=false; aceOnline.privateHand=[]; aceOnline.privateHandRevision=-1;
+            state=freshOnlineState(room.mode,room.seatPlan);
+            setMode(state.mode);
+            document.getElementById('online-overlay').classList.add('hidden');
+            document.getElementById('lobby-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden'); document.getElementById('game-screen').classList.add('flex');
+            document.getElementById('mode-display').textContent=state.mode==='quick'?'Quick':'Long R1';
+            if(aceOnline.isHost) {
+              attachHostActionListeners();
+              startGame();
+            } else {
+              aceOnline.db.ref('matchPublic/'+aceOnline.roomCode).on('value',snap=>{
+                if(!snap.exists()) return;
+                const pub=snap.val(); if(Number(pub.revision||0)<aceOnline.lastPublicRevision) return;
+                aceOnline.lastPublicRevision=Number(pub.revision||0); aceOnline.lastPublic=pub; renderRemotePublicState(pub);
+              },err=>{pulseMessage('Game connection error'); onlineMessage('Game state read failed: '+err.message,true);});
+              aceOnline.db.ref('privateHands/'+aceOnline.roomCode+'/'+aceOnline.uid).on('value',snap=>{
+                if(!snap.exists()) return;
+                const h=snap.val()||{}; const rev=Number(h.revision||0);
+                if(rev<aceOnline.privateHandRevision) return;
+                aceOnline.privateHandRevision=rev; aceOnline.privateHand=Array.isArray(h.cards)?h.cards:[]; aceOnline.privateHandReady=true;
+                if(aceOnline.lastPublic) renderRemotePublicState(aceOnline.lastPublic);
+              },err=>onlineMessage('Private hand read failed: '+err.message,true));
+            }
+          } finally { aceOnline.startInProgress=false; }
+        }
+        function attachHostActionListeners() {
+          aceOnline.playerUids.forEach(guestUid=>{
+            if(!guestUid||guestUid===aceOnline.uid) return;
+            const ref=aceOnline.db.ref(`actions/${aceOnline.roomCode}/${guestUid}`);
+            ref.on('child_added',snap=>{
+              const action=snap.val(); if(!action) {snap.ref.remove().catch(()=>{});return;}
+              processOnlineAction(guestUid,snap.key,action).catch(e=>console.error('ACE action processing failed',e));
+            },err=>onlineMessage('Player action listener failed: '+err.message,true));
+          });
+        }
+        async function processOnlineAction(uid,actionId,action) {
+          try {
+            const playerIndex=aceOnline.playerUids.indexOf(uid);
+            if(!aceOnline.isHost || playerIndex<1 || !action || typeof action.type!=='string' || !state.players[playerIndex]) return;
+            if(action.type==='playCard') {
+              if(!state.gameActive||state.turnIndex!==playerIndex||state.players[playerIndex].hasFinished||state.pendingPrompt) return;
+              const index=state.players[playerIndex].hand.findIndex(c=>c.id===action.cardId);
+              if(index<0) return;
+              playCard(playerIndex,index);
+            } else if(action.type==='begStart') {
+              if(state.gameActive&&state.turnIndex===playerIndex&&!state.players[playerIndex].hasFinished&&!state.pendingPrompt) startBeggingFor(playerIndex);
+            } else if(action.type==='begChoose') {
+              const p=state.pendingPrompt;
+              if(p&&p.type==='begChoice'&&p.beggarId===playerIndex&&p.eligibleIds.includes(Number(action.targetId))) startBegRequest(playerIndex,Number(action.targetId));
+            } else if(action.type==='begResponse') {
+              const p=state.pendingPrompt;
+              if(p&&p.type==='begResponse'&&p.targetId===playerIndex) onlineFinalizeBeg(playerIndex,action.accepted===true);
+            } else if(action.type==='begCancel') {
+              const p=state.pendingPrompt;
+              if(p&&p.type==='begChoice'&&p.beggarId===playerIndex) { clearOnlinePromptTimer(); state.pendingPrompt=null; pulseMessage('Begging cancelled'); startTimer(); updateUI(); }
+            }
+          } finally {
+            // The host deletes processed action entries; this is also the acknowledgement.
+            try { await aceOnline.db.ref(`actions/${aceOnline.roomCode}/${uid}/${actionId}`).remove(); } catch(e) { console.warn('Could not remove processed action',e); }
+          }
+        }
+        function sendOnlineAction(type,fields) {
+          if(!isOnlineGame()||aceOnline.isHost) return;
+          const action={type,at:Date.now(),...(fields||{})};
+          aceOnline.db.ref(`actions/${aceOnline.roomCode}/${aceOnline.uid}`).push(action).catch(e=>onlineMessage('Action send failed: '+e.message,true));
+        }
+        function publicStateSnapshot() {
+          return {
+            revision:++aceOnline.publicRevision,mode:state.mode,humanCount:state.players.filter(p=>!p.isBot).length,totalCount:state.players.length,
+            players:state.players.map(p=>({id:p.id,name:p.name,isBot:p.isBot,handCount:p.hand.length,penaltyAces:p.penaltyAces||0,consecutiveCuts:p.consecutiveCuts||0,nemesis:p.nemesis??null,hasFinished:!!p.hasFinished})),
+            pile:state.pile.map(p=>({card:p.card,playerId:p.playerId})),turnIndex:state.turnIndex,startPlayerIndex:state.startPlayerIndex,
+            leadSuit:state.leadSuit,highestCardInSuit:state.highestCardInSuit,lastCutSuit:state.lastCutSuit,
+            roundLoser:state.roundLoser,gameLoserId:state.gameLoserId??null,gameActive:!!state.gameActive,roundComplete:!!state.roundComplete,
+            roundNumber:state.roundNumber,winners:state.winners,begDeclinedThisTurn:!!state.begDeclinedThisTurn,
+            pendingPrompt:state.pendingPrompt?JSON.parse(JSON.stringify(state.pendingPrompt)):null,
+            roundReveal:state.roundReveal?{card:state.roundReveal.card,playerName:state.roundReveal.playerName}:null,
+            timerSeconds:state.timerSeconds||30,statusText:document.getElementById('status-text').textContent||''
+          };
+        }
+        function publishOnlineState() {
+          if(!isOnlineGame()||!aceOnline.isHost||!state.players.length) return;
+          const pub=publicStateSnapshot();
+          aceOnline.db.ref('matchPublic/'+aceOnline.roomCode).set(pub).catch(e=>onlineMessage('Public game sync failed: '+e.message,true));
+          aceOnline.playerUids.forEach((uid,index)=>{
+            const player=state.players[index]; if(!uid||!player) return;
+            aceOnline.db.ref(`privateHands/${aceOnline.roomCode}/${uid}`).set({revision:pub.revision,cards:player.hand}).catch(e=>onlineMessage('Private hand sync failed: '+e.message,true));
+          });
+        }
+        function renderRemotePublicState(pub) {
+          if(!pub||!Array.isArray(pub.players)) return;
+          const localIdx=aceOnline.playerIndex;
+          const meta=pub.players;
+          const localHand=(aceOnline.privateHandReady&&aceOnline.privateHandRevision>=Number(pub.revision||0))?aceOnline.privateHand:[];
+          state={...state,mode:pub.mode||'quick',humanCount:Number(pub.humanCount||meta.filter(p=>!p.isBot).length),totalCount:Number(pub.totalCount||meta.length),
+            players:meta.map((p,id)=>({id:p.id??id,name:p.name||`Player ${id+1}`,isBot:!!p.isBot,hand:(id===localIdx?localHand:Array.from({length:Number(p.handCount||0)},()=>({hidden:true}))),penaltyAces:Number(p.penaltyAces||0),consecutiveCuts:Number(p.consecutiveCuts||0),nemesis:p.nemesis??null,hasFinished:!!p.hasFinished})),
+            pile:Array.isArray(pub.pile)?pub.pile:[],turnIndex:Number(pub.turnIndex||0),startPlayerIndex:Number(pub.startPlayerIndex||0),leadSuit:pub.leadSuit||null,highestCardInSuit:pub.highestCardInSuit||null,lastCutSuit:pub.lastCutSuit||null,roundLoser:pub.roundLoser??null,gameLoserId:pub.gameLoserId??null,gameActive:!!pub.gameActive,roundComplete:!!pub.roundComplete,roundNumber:Number(pub.roundNumber||1),winners:Array.isArray(pub.winners)?pub.winners:[],begDeclinedThisTurn:!!pub.begDeclinedThisTurn,pendingPrompt:pub.pendingPrompt||null,roundReveal:pub.roundReveal||null,timerSeconds:Number(pub.timerSeconds||30),deck:[],memory:{voidSuits:{},suitPlayCount:{'♠':0,'♥':0,'♣':0,'♦':0}}};
+          document.getElementById('mode-display').textContent=state.mode==='quick'?'Quick':`Long R${state.roundNumber}`;
+          if(pub.statusText) updateStatus(pub.statusText);
+          updateUI();
+        }
+        function clearOnlinePromptTimer() {
+          if(aceOnline.promptTimeout) clearTimeout(aceOnline.promptTimeout);
+          aceOnline.promptTimeout=null;
+        }
+        function clearOnlinePromptDisplay() {
+          if(aceOnline.promptDisplayInterval) clearInterval(aceOnline.promptDisplayInterval);
+          aceOnline.promptDisplayInterval=null;
+        }
+        function setOnlinePrompt(prompt) {
+          clearOnlinePromptTimer(); state.pendingPrompt=prompt;
+          aceOnline.promptTimeout=setTimeout(()=>{
+            const p=state.pendingPrompt; if(!p) return;
+            if(p.type==='begResponse') onlineFinalizeBeg(p.targetId,false);
+            else { clearOnlinePromptTimer(); state.pendingPrompt=null; pulseMessage('Begging timed out'); startTimer(); updateUI(); }
+          },Math.max(1000,Number(prompt.expiresAt||Date.now()+10000)-Date.now()));
+          updateUI();
+        }
+        function startBeggingFor(beggarId) {
+          if(state.begDeclinedThisTurn) { pulseMessage('Declined! Wait for next turn.'); return; }
+          if(!state.gameActive||state.turnIndex!==beggarId||state.pendingPrompt) return;
+          resetTimer();
+          const {left,right}=getNeighbors(beggarId), eligible=[];
+          [left,right].forEach(p=>{if(p&&p.id!==beggarId&&p.hand.length>0&&p.hand.length<=3&&!eligible.includes(p.id))eligible.push(p.id);});
+          if(!eligible.length) { pulseMessage('No neighbors with 1-3 cards!'); startTimer(); return; }
+          if(eligible.length===1) { startBegRequest(beggarId,eligible[0]); return; }
+          setOnlinePrompt({type:'begChoice',beggarId,eligibleIds:eligible,expiresAt:Date.now()+10000});
+        }
+        function startBegRequest(beggarId,targetId) {
+          clearOnlinePromptTimer(); state.pendingPrompt=null;
+          const target=state.players[targetId], beggar=state.players[beggarId];
+          if(!target||!beggar||target.hand.length===0||target.hand.length>3) { startTimer(); updateUI(); return; }
+          state.turnIndex=beggarId;
+          if(target.isBot) {
+            const avgRank=target.hand.reduce((sum,c)=>sum+c.rank,0)/target.hand.length;
+            const accepted=Math.random()<(avgRank>8?0.9:0.4);
+            updateStatus('Asking '+target.name+'…'); updateUI();
+            setTimeout(()=>onlineFinalizeBeg(targetId,accepted),1000);
+          } else {
+            setOnlinePrompt({type:'begResponse',beggarId,targetId,beggarName:beggar.name,targetName:target.name,expiresAt:Date.now()+10000});
+          }
+        }
+        function onlineFinalizeBeg(targetId,accepted) {
+          clearOnlinePromptTimer(); state.pendingPrompt=null;
+          const target=state.players[targetId], beggar=state.players[state.turnIndex];
+          if(!target||!beggar) { updateUI(); return; }
+          if(accepted) {
+            pulseMessage(`${beggar.name} begged cards from ${target.name}!`);
+            beggar.hand.push(...target.hand); target.hand=[]; target.hasFinished=true; state.winners.push(target.id);
+            beggar.hand.sort((a,b)=>{if(a.suit===b.suit)return b.rank-a.rank;return a.suit.charCodeAt(0)-b.suit.charCodeAt(0);});
+            checkWinConditions(); updateUI();
+            if(state.gameActive) { if(beggar.isBot) setTimeout(botPlay,1000); else startTimer(); }
+          } else {
+            state.begDeclinedThisTurn=true; pulseMessage(`${target.name} Declined!`); updateUI();
+            if(beggar.isBot) setTimeout(botPlay,1000); else startTimer();
+          }
+        }
+        function syncOnlineModals() {
+          if(!isOnlineGame()) return;
+          const reveal=document.getElementById('open-card-modal');
+          if(state.roundReveal) {
+            document.getElementById('open-card-display').innerHTML=`<div class="flex flex-col items-center gap-4">${renderCardHTML(state.roundReveal.card,false)}<div class="bg-gray-800 px-4 py-2 rounded-lg border border-gray-600 shadow-lg"><span class="text-gray-400 text-sm">Dealt to</span><div class="text-xl font-bold text-yellow-400">${state.roundReveal.playerName||'Player'}</div></div></div>`;
+            reveal.classList.remove('hidden');
+            const startBtn=reveal.querySelector('button');
+            if(startBtn){startBtn.disabled=!aceOnline.isHost;startBtn.textContent=aceOnline.isHost?'Start Game':'Waiting for host…';startBtn.classList.toggle('opacity-50',!aceOnline.isHost);}
+          } else { reveal.classList.add('hidden'); }
+          const over=document.getElementById('game-over-modal');
+          if(state.roundComplete) {
+            const loser=state.players.find(p=>p.id===state.gameLoserId);
+            document.getElementById('loser-name').textContent=loser?`${loser.name} is the Donkey!`:'Round complete.';
+            over.classList.remove('hidden');over.classList.add('flex');
+            document.getElementById('long-run-controls').classList.toggle('hidden',state.mode!=='long'||!aceOnline.isHost);
+            document.getElementById('quick-game-controls').classList.toggle('hidden',state.mode!=='quick');
+          } else {over.classList.add('hidden');over.classList.remove('flex');}
+          const p=state.pendingPrompt;
+          const key=p?`${p.type}:${p.beggarId??''}:${p.targetId??''}:${(p.eligibleIds||[]).join(',')}:${p.expiresAt}`:'';
+          if(key!==aceOnline.renderedPromptKey) {
+            if(aceOnline.promptDisplayInterval) clearInterval(aceOnline.promptDisplayInterval);
+            aceOnline.promptDisplayInterval=null;aceOnline.renderedPromptKey=key;
+            document.getElementById('beg-choice-modal').classList.add('hidden');
+            document.getElementById('beg-request-modal').classList.add('hidden');
+            if(p && p.type==='begChoice' && p.beggarId===aceOnline.playerIndex) {
+              const ids=p.eligibleIds||[];
+              if(ids.length>=2) {
+                const {left,right}=getNeighbors(p.beggarId);
+                const leftId=ids[0],rightId=ids[1];
+                document.getElementById('beg-left-name').textContent=state.players[leftId]?.name||'Left';
+                document.getElementById('beg-right-name').textContent=state.players[rightId]?.name||'Right';
+                document.getElementById('beg-left-btn').onclick=()=>chooseOnlineBegTarget(leftId);
+                document.getElementById('beg-right-btn').onclick=()=>chooseOnlineBegTarget(rightId);
+                document.getElementById('beg-choice-modal').classList.remove('hidden');
+              }
+            } else if(p && p.type==='begResponse' && p.targetId===aceOnline.playerIndex) {
+              document.getElementById('beg-request-text').textContent=`${p.beggarName||'A player'} is begging for your cards.`;
+              document.getElementById('beg-accept-btn').onclick=()=>answerOnlineBeg(true);
+              document.getElementById('beg-decline-btn').onclick=()=>answerOnlineBeg(false);
+              document.getElementById('beg-request-modal').classList.remove('hidden');
+            }
+            if(p && ((p.type==='begChoice' && p.beggarId===aceOnline.playerIndex)||(p.type==='begResponse'&&p.targetId===aceOnline.playerIndex))) {
+              const tick=()=>{const remaining=Math.max(0,Math.ceil((Number(p.expiresAt||Date.now())-Date.now())/1000));const id=p.type==='begChoice'?'beg-choice-timer':'beg-request-timer';document.getElementById(id).textContent=String(remaining);};tick();aceOnline.promptDisplayInterval=setInterval(tick,250);
+            }
+          }
+        }
+        function chooseOnlineBegTarget(targetId) {
+          clearOnlinePromptDisplay(); document.getElementById('beg-choice-modal').classList.add('hidden');
+          if(aceOnline.isHost) startBegRequest(aceOnline.playerIndex,targetId); else sendOnlineAction('begChoose',{targetId});
+        }
+        function answerOnlineBeg(accepted) {
+          clearOnlinePromptDisplay();document.getElementById('beg-request-modal').classList.add('hidden');
+          if(aceOnline.isHost) onlineFinalizeBeg(aceOnline.playerIndex,accepted); else sendOnlineAction('begResponse',{accepted});
+        }
+    </script>
+</body>
+</html>
